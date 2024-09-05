@@ -139,7 +139,7 @@ const executeSideEffects = R.curry(
             R.tap(
               R.ifElse(
                 (error) => error instanceof CustomError && skipUpstreamErrorOnSideEffects,
-                ()=> subscriber.error(error),
+                (error)=> subscriber.error(error),
                 (error) => sideEffects?.forEach(
                   ({ onError }) => onError && onError(id, error, latestValue$.getValue())
                 )
