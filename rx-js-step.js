@@ -4,9 +4,13 @@ const {
   catchError,
   concatMap,
   from,
+  scan,
   map,
   of,
   tap,
+  lastValueFrom,
+  throwError,
+  BehaviorSubject
 } = require("rxjs");
 const R = require("ramda");
 
@@ -38,9 +42,7 @@ const executeOperator =
           concatMap((value) =>
             of(value).pipe(
               operator,
-              catchError((err) => {
-                throw err;
-              })
+              catchError((error)=> throwError(error))
             )
           )
         )
@@ -64,27 +66,34 @@ const none = (source$) =>
   new Observable((subscriber) =>
     source$
       .pipe(
-        map(() => new Error("operator or deferredPromiseFn is not valid prop"))
+        map(() => throwError(new Error("operator or deferredPromiseFn is not valid prop")))
       )
       .subscribe(subscriber)
   );
 
 const executeSideEffects = R.curry(
   ({ id, sideEffects }, target$, source$) =>
-    new Observable((subscriber) =>
-      source$
+    new Observable((subscriber) => {
+      const latestValue$ = new BehaviorSubject(null);
+
+      return source$
         .pipe(
           tap((value) =>
             sideEffects?.forEach(
               ({ onBefore }) => onBefore && onBefore(id, value)
             )
           ),
+          concatMap((value) => {
+            latestValue$.next(value);
+
+            return of(value)
+          }),
           target$,
           tap(
-            // next
+            // next on tap
             R.pipe(
               R.when(
-                isNotNever(value),
+                isNotNever,
                 R.tap((value) =>
                   sideEffects?.forEach(
                     ({ onAfter }) => onAfter && onAfter(id, value)
@@ -93,10 +102,10 @@ const executeSideEffects = R.curry(
               ),
               R.tap((value) => subscriber.next(value))
             ),
-            // error
+            // error on tap
             R.tap((error) =>
               sideEffects?.forEach(
-                ({ onError }) => onError && onError(id, error)
+                ({ onError }) => onError && onError(id, error, latestValue$.getValue())
               )
             )
           )
@@ -105,40 +114,9 @@ const executeSideEffects = R.curry(
           error: (err) => subscriber.error(err),
           complete: () => subscriber.complete(),
         })
-    )
+    })
+  
 );
-
-const linkStreamFactory = ({ emit }) =>
-  R.curry(({ id, extractId, onNext }, el) =>
-    R.tap((el) =>
-      emit(extractId ? extractId(el) : id, onNext ? onNext(el) : el)
-    )(el)
-  );
-
-const stepLoggerFactory = (services, settings) => settings(services);
-
-class customError extends Error {
-  constructor({ message = "undefined", description = "undefined", data = {} }) {
-    super(message);
-
-    this.name = "rx-js-step stream error ";
-    this.originMessage = message;
-    this.description = description;
-    this.data = data;
-
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, customError);
-    }
-  }
-
-  isSame(err) {
-    return (
-      this.name === err.name &&
-      this.message === err.message &&
-      this.description === err.description
-    );
-  }
-}
 
 module.exports = { step };
 
