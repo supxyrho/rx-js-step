@@ -4,11 +4,9 @@ const {
   catchError,
   concatMap,
   from,
-  scan,
   map,
   of,
   tap,
-  lastValueFrom,
   throwError,
   BehaviorSubject
 } = require("rxjs");
@@ -20,10 +18,16 @@ const step =
     operator = null,
     deferredPromiseFn = null,
     sideEffects = null,
+    interceptor = null,
+    skipUpstreamErrorOnSideEffects = false,
+    skipUpstreamErrorOnInterceptor = false,
   }) =>
   (source$) =>
-    executeSideEffects({ id, sideEffects })(
+    executeSideEffects({ id, sideEffects, skipUpstreamErrorOnSideEffects})(
       executeOperator({
+        id,
+        interceptor,
+        skipUpstreamErrorOnInterceptor,
         operator: deferredPromiseFn
           ? liftToObvervable(deferredPromiseFn)
           : operator
@@ -34,21 +38,51 @@ const step =
     )(source$);
 
 const executeOperator =
-  ({ operator }) =>
+  ({ id, interceptor, skipUpstreamErrorOnInterceptor, operator }) =>
   (source$) => {
+    const latestValue$ = new BehaviorSubject(null);
+
     return new Observable((subscriber) =>
       source$
         .pipe(
-          concatMap((value) =>
-            of(value).pipe(
-              operator,
-              catchError((error)=> throwError(error))
+          concatMap((value)=> {
+
+            let nextValue = null
+            if(interceptor.onBefore){
+              nextValue = interceptor.onBefore(id, value)
+            } else {
+              nextValue = value
+            }
+
+            latestValue$.next(nextValue)
+
+            return of(nextValue).pipe(
+                  operator,
+                  catchError((error)=> throwError(new CustomError(error)))
             )
-          )
+          })
         )
         .subscribe({
-          next: (value) => subscriber.next(value),
-          error: (error) => subscriber.error(error),
+          next: (value) => { 
+            let nextValue = null 
+            if(interceptor.onAfter){
+                nextValue = interceptor.onAfter(id, value)
+            } else {
+                nextValue = value
+            }
+
+            
+            subscriber.next(nextValue)
+          },
+          error: (error) => { 
+            let nextError = null
+            if(interceptor.onError && !skipUpstreamErrorOnInterceptor){
+              nextError = interceptor.onError(id, error, latestValue$.getValue())
+            } else {
+              nextError = error
+            }
+
+            subscriber.error(nextError) },
           complete: () => subscriber.complete(),
         })
     );
@@ -72,7 +106,7 @@ const none = (source$) =>
   );
 
 const executeSideEffects = R.curry(
-  ({ id, sideEffects }, target$, source$) =>
+  ({ id, sideEffects, skipUpstreamErrorOnSideEffects }, target$, source$) =>
     new Observable((subscriber) => {
       const latestValue$ = new BehaviorSubject(null);
 
@@ -86,9 +120,8 @@ const executeSideEffects = R.curry(
           concatMap((value) => {
             latestValue$.next(value);
 
-            return of(value)
+            return of(value).pipe(target$)
           }),
-          target$,
           tap(
             // next on tap
             R.pipe(
@@ -103,9 +136,13 @@ const executeSideEffects = R.curry(
               R.tap((value) => subscriber.next(value))
             ),
             // error on tap
-            R.tap((error) =>
-              sideEffects?.forEach(
-                ({ onError }) => onError && onError(id, error, latestValue$.getValue())
+            R.tap(
+              R.ifElse(
+                (error) => error instanceof CustomError && skipUpstreamErrorOnSideEffects,
+                ()=> subscriber.error(error),
+                (error) => sideEffects?.forEach(
+                  ({ onError }) => onError && onError(id, error, latestValue$.getValue())
+                )
               )
             )
           )
@@ -121,3 +158,11 @@ const executeSideEffects = R.curry(
 module.exports = { step };
 
 const isNotNever = R.complement(R.equals(NEVER));
+
+class CustomError extends Error{ 
+  constructor(message ){
+    super(message);
+    this.name = "CustomError";
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
