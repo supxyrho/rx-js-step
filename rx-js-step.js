@@ -48,7 +48,7 @@ const executeOperator =
           concatMap((value)=> {
 
             let nextValue = null
-            if(interceptor.onBefore){
+            if(interceptor?.onBefore){
               nextValue = interceptor.onBefore(id, value)
             } else {
               nextValue = value
@@ -65,7 +65,7 @@ const executeOperator =
         .subscribe({
           next: (value) => { 
             let nextValue = null 
-            if(interceptor.onAfter){
+            if(interceptor?.onAfter){
                 nextValue = interceptor.onAfter(id, value)
             } else {
                 nextValue = value
@@ -76,7 +76,7 @@ const executeOperator =
           },
           error: (error) => { 
             let nextError = null
-            if(interceptor.onError && !skipUpstreamErrorOnInterceptor){
+            if(interceptor?.onError && !skipUpstreamErrorOnInterceptor){
               nextError = interceptor.onError(id, error, latestValue$.getValue())
             } else {
               nextError = error
