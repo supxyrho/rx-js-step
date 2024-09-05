@@ -58,7 +58,7 @@ const executeOperator =
 
             return of(nextValue).pipe(
                   operator,
-                  catchError((error)=> throwError(new CustomError(error)))
+                  catchError((error)=> throwError(new CustomError(id, error)))
             )
           })
         )
@@ -75,11 +75,14 @@ const executeOperator =
             subscriber.next(nextValue)
           },
           error: (error) => { 
-            let nextError = null
-            if(interceptor?.onError && !skipUpstreamErrorOnInterceptor){
-              nextError = interceptor.onError(id, error, latestValue$.getValue())
+            let nextError = null;
+
+            if ( error instanceof CustomError && skipUpstreamErrorOnInterceptor && error.id !== id) {
+              nextError = error;
+            } else if (interceptor?.onError ) {
+              nextError = interceptor.onError(id, error, latestValue$.getValue());
             } else {
-              nextError = error
+              nextError = error;
             }
 
             subscriber.error(nextError) },
@@ -138,7 +141,7 @@ const executeSideEffects = R.curry(
             // error on tap
             R.tap(
               R.ifElse(
-                (error) => error instanceof CustomError && skipUpstreamErrorOnSideEffects,
+                (error) => error instanceof CustomError && skipUpstreamErrorOnSideEffects && error.id !== id,
                 (error)=> subscriber.error(error),
                 (error) => sideEffects?.forEach(
                   ({ onError }) => onError && onError(id, error, latestValue$.getValue())
@@ -160,8 +163,10 @@ module.exports = { step };
 const isNotNever = R.complement(R.equals(NEVER));
 
 class CustomError extends Error{ 
+  id = null;
   constructor(message ){
     super(message);
+    this.id = id;
     this.name = "CustomError";
     Error.captureStackTrace(this, this.constructor);
   }
