@@ -8,7 +8,7 @@ const {
   of,
   tap,
   throwError,
-  BehaviorSubject
+  BehaviorSubject,
 } = require("rxjs");
 const R = require("ramda");
 
@@ -23,75 +23,41 @@ const step =
     skipUpstreamErrorOnInterceptor = false,
   }) =>
   (source$) =>
-    executeSideEffects({ id, sideEffects, skipUpstreamErrorOnSideEffects})(
-      executeOperator({
-        id,
-        interceptor,
-        skipUpstreamErrorOnInterceptor,
-        operator: deferredPromiseFn
-          ? liftToObvervable(deferredPromiseFn)
-          : operator
-            ? operator
-            : none,
-        deferredPromiseFn,
-      })
+    executeSideEffects({ id, sideEffects, skipUpstreamErrorOnSideEffects })(
+      executeInterceptor({ id, interceptor, skipUpstreamErrorOnInterceptor })(
+        executeOperator({
+          id,
+          operator:
+            operator ??
+            deferredPromiseToObservable(deferredPromiseFn) ??
+            throwCustomError,
+          deferredPromiseFn,
+        })
+      )
     )(source$);
 
 const executeOperator =
-  ({ id, interceptor, skipUpstreamErrorOnInterceptor, operator }) =>
+  ({ id, operator }) =>
   (source$) => {
     const latestValue$ = new BehaviorSubject(null);
 
     return new Observable((subscriber) =>
       source$
         .pipe(
-          concatMap((value)=> {
+          concatMap((value) => {
+            latestValue$.next(value);
 
-            let nextValue = null
-            if(interceptor?.onBefore){
-              nextValue = interceptor.onBefore(id, value)
-            } else {
-              nextValue = value
-            }
-
-            latestValue$.next(nextValue)
-
-            return of(nextValue).pipe(
-                  operator,
-                  catchError((error)=> throwError(new CustomError(id, error)))
-            )
+            return of(value).pipe(
+              operator,
+              catchError((error) => throwError(new CustomError(id, error)))
+            );
           })
         )
-        .subscribe({
-          next: (value) => { 
-            let nextValue = null 
-            if(interceptor?.onAfter){
-                nextValue = interceptor.onAfter(id, value)
-            } else {
-                nextValue = value
-            }
-
-            
-            subscriber.next(nextValue)
-          },
-          error: (error) => { 
-            let nextError = null;
-
-            if ( error instanceof CustomError && skipUpstreamErrorOnInterceptor && error.id !== id) {
-              nextError = error;
-            } else if (interceptor?.onError ) {
-              nextError = interceptor.onError(id, error, latestValue$.getValue());
-            } else {
-              nextError = error;
-            }
-
-            subscriber.error(nextError) },
-          complete: () => subscriber.complete(),
-        })
+        .subscribe(subscriber)
     );
   };
 
-const liftToObvervable = (deferredPromiseFn) => (source$) => {
+const deferredPromiseToObservable = (deferredPromiseFn) => (source$) => {
   return new Observable((subscriber) =>
     source$
       .pipe(concatMap((value) => from(deferredPromiseFn(value))))
@@ -99,14 +65,23 @@ const liftToObvervable = (deferredPromiseFn) => (source$) => {
   );
 };
 
-const none = (source$) =>
-  new Observable((subscriber) =>
-    source$
-      .pipe(
-        map(() => throwError(new Error("operator or deferredPromiseFn is not valid prop")))
-      )
-      .subscribe(subscriber)
-  );
+const throwCustomError = R.curry(
+  ({ id, value }, source$) =>
+    new Observable((subscriber) =>
+      source$
+        .pipe(
+          map(() =>
+            throwError(
+              new CustomError(
+                id,
+                "operator or deferredPromiseFn is not valid prop"
+              )
+            )
+          )
+        )
+        .subscribe(subscriber)
+    )
+);
 
 const executeSideEffects = R.curry(
   ({ id, sideEffects, skipUpstreamErrorOnSideEffects }, target$, source$) =>
@@ -123,7 +98,7 @@ const executeSideEffects = R.curry(
           concatMap((value) => {
             latestValue$.next(value);
 
-            return of(value).pipe(target$)
+            return of(value).pipe(target$);
           }),
           tap(
             // next on tap
@@ -141,11 +116,16 @@ const executeSideEffects = R.curry(
             // error on tap
             R.tap(
               R.ifElse(
-                (error) => error instanceof CustomError && skipUpstreamErrorOnSideEffects && error.id !== id,
-                (error)=> subscriber.error(error),
-                (error) => sideEffects?.forEach(
-                  ({ onError }) => onError && onError(id, error, latestValue$.getValue())
-                )
+                (error) =>
+                  error instanceof CustomError &&
+                  skipUpstreamErrorOnSideEffects &&
+                  error.id !== id,
+                (error) => subscriber.error(error),
+                (error) =>
+                  sideEffects?.forEach(
+                    ({ onError }) =>
+                      onError && onError(id, error, latestValue$.getValue())
+                  )
               )
             )
           )
@@ -153,18 +133,78 @@ const executeSideEffects = R.curry(
         .subscribe({
           error: (err) => subscriber.error(err),
           complete: () => subscriber.complete(),
-        })
+        });
     })
-  
+);
+
+const executeInterceptor = R.curry(
+  ({ id, interceptor, skipUpstreamErrorOnInterceptor }, target$, source$) =>
+    new Observable((subscriber) => {
+      const latestValue$ = new BehaviorSubject(null);
+
+      return source$
+        .pipe(
+          concatMap((value) => {
+            let nextValue = null;
+            if (interceptor?.onBefore) {
+              nextValue = interceptor.onBefore(id, value);
+            } else {
+              nextValue = value;
+            }
+
+            latestValue$.next(nextValue);
+
+            return of(nextValue).pipe(
+              operator,
+              catchError((error) => throwError(new CustomError(id, error)))
+            );
+          }),
+          target$
+        )
+        .subscribe({
+          next: (value) => {
+            let nextValue = null;
+            if (interceptor?.onAfter) {
+              nextValue = interceptor.onAfter(id, value);
+            } else {
+              nextValue = value;
+            }
+
+            subscriber.next(nextValue);
+          },
+          error: (error) => {
+            let nextError = null;
+
+            if (
+              error instanceof CustomError &&
+              skipUpstreamErrorOnInterceptor &&
+              error.id !== id
+            ) {
+              nextError = error;
+            } else if (interceptor?.onError) {
+              nextError = interceptor.onError(
+                id,
+                error,
+                latestValue$.getValue()
+              );
+            } else {
+              nextError = error;
+            }
+
+            subscriber.error(nextError);
+          },
+          complete: () => subscriber.complete(),
+        });
+    })
 );
 
 module.exports = { step };
 
 const isNotNever = R.complement(R.equals(NEVER));
 
-class CustomError extends Error{ 
+class CustomError extends Error {
   id = null;
-  constructor(message ){
+  constructor(message) {
     super(message);
     this.id = id;
     this.name = "CustomError";
