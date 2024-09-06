@@ -36,17 +36,12 @@ const step =
       )
     )(source$);
 
-const executeOperator =
-  ({ id, operator }) =>
-  (source$) => {
-    const latestValue$ = new BehaviorSubject(null);
-
-    return new Observable((subscriber) =>
+const executeOperator = R.curry(
+  ({ id, operator }, source$) =>
+    new Observable((subscriber) =>
       source$
         .pipe(
           concatMap((value) => {
-            latestValue$.next(value);
-
             return of(value).pipe(
               operator,
               catchError((error) => throwError(new CustomError(id, error)))
@@ -54,8 +49,8 @@ const executeOperator =
           })
         )
         .subscribe(subscriber)
-    );
-  };
+    )
+);
 
 const deferredPromiseToObservable = (deferredPromiseFn) => (source$) => {
   return new Observable((subscriber) =>
