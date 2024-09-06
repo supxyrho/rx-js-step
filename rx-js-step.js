@@ -78,7 +78,7 @@ const throwInvalidOperatorError = R.curry(
         )
         .subscribe({
           error: (err) => {
-            subscriber.error(new error(err));
+            subscriber.error(err);
           },
         })
     )
@@ -156,7 +156,6 @@ const executeInterceptor = R.curry(
             latestValue$.next(nextValue);
 
             return of(nextValue).pipe(
-              operator,
               catchError((error) => throwError(new CustomError(id, error)))
             );
           }),
@@ -205,7 +204,7 @@ const isNotNever = R.complement(R.equals(NEVER));
 
 class CustomError extends Error {
   id = null;
-  constructor(message) {
+  constructor(id, message) {
     super(message);
     this.id = id;
     this.name = "CustomError";
