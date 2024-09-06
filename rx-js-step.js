@@ -23,8 +23,8 @@ const step =
     skipUpstreamErrorOnInterceptor = false,
   }) =>
   (source$) =>
-    executeSideEffects({ id, sideEffects, skipUpstreamErrorOnSideEffects })(
-      executeInterceptor({ id, interceptor, skipUpstreamErrorOnInterceptor })(
+    executeInterceptor({ id, interceptor, skipUpstreamErrorOnInterceptor })(
+      executeSideEffects({ id, sideEffects, skipUpstreamErrorOnSideEffects })(
         executeOperator({
           id,
           operator:
@@ -84,6 +84,7 @@ const throwInvalidOperatorError = R.curry(
     )
 );
 
+// @TODO: onBefore과 onAfter, onError 두 부분으로 나눈다.
 const executeSideEffects = R.curry(
   ({ id, sideEffects, skipUpstreamErrorOnSideEffects }, target$, source$) =>
     new Observable((subscriber) => {
@@ -138,6 +139,7 @@ const executeSideEffects = R.curry(
     })
 );
 
+// @TODO: onBefore과 onAfter, onError 두 부분으로 나눈다.
 const executeInterceptor = R.curry(
   ({ id, interceptor, skipUpstreamErrorOnInterceptor }, target$, source$) =>
     new Observable((subscriber) => {
