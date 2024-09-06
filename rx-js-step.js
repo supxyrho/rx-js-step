@@ -30,7 +30,7 @@ const step =
           operator:
             operator ??
             deferredPromiseToObservable(deferredPromiseFn) ??
-            throwCustomError,
+            throwInvalidOperatorError,
           deferredPromiseFn,
         })
       )
@@ -65,21 +65,22 @@ const deferredPromiseToObservable = (deferredPromiseFn) => (source$) => {
   );
 };
 
-const throwCustomError = R.curry(
-  ({ id, value }, source$) =>
+const throwInvalidOperatorError = R.curry(
+  (source$) =>
     new Observable((subscriber) =>
       source$
         .pipe(
           map(() =>
             throwError(
-              new CustomError(
-                id,
-                "operator or deferredPromiseFn is not valid prop"
-              )
+              new error("operator or deferredPromiseFn is not valid prop")
             )
           )
         )
-        .subscribe(subscriber)
+        .subscribe({
+          error: (err) => {
+            subscriber.error(new error(err));
+          },
+        })
     )
 );
 
