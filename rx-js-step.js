@@ -29,7 +29,7 @@ const step =
           id,
           operator:
             operator ??
-            deferredPromiseToObservable(deferredPromiseFn) ??
+            deferredPromiseToObservable({ deferredPromiseFn }) ??
             throwInvalidOperatorError,
           deferredPromiseFn,
         })
@@ -52,13 +52,15 @@ const executeOperator = R.curry(
     )
 );
 
-const deferredPromiseToObservable = (deferredPromiseFn) => (source$) => {
-  return new Observable((subscriber) =>
-    source$
-      .pipe(concatMap((value) => from(deferredPromiseFn(value))))
-      .subscribe(subscriber)
-  );
-};
+const deferredPromiseToObservable = R.curry(
+  ({ deferredPromiseFn }, source$) => {
+    return new Observable((subscriber) =>
+      source$
+        .pipe(concatMap((value) => from(deferredPromiseFn(value))))
+        .subscribe(subscriber)
+    );
+  }
+);
 
 const throwInvalidOperatorError = R.curry(
   (source$) =>
