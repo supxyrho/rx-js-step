@@ -159,16 +159,8 @@ const executeInterceptor = R.curry(
           target$
         )
         .subscribe({
-          next: (value) => {
-            let nextValue = null;
-            if (interceptor?.onAfter) {
-              nextValue = interceptor.onAfter(id, value);
-            } else {
-              nextValue = value;
-            }
-
-            subscriber.next(nextValue);
-          },
+          next: (value) => 
+            subscriber.next( interceptor?.onAfter(id, value) ?? value),
           error: (error) => {
             let nextError = null;
 
