@@ -6,10 +6,13 @@ const {
   from,
   map,
   of,
+  queueScheduler,
   tap,
   throwError,
   BehaviorSubject,
 } = require("rxjs");
+const { observeOn } = require('rxjs/operators');
+
 const R = require("ramda");
 
 const step =
@@ -19,21 +22,29 @@ const step =
     deferredPromiseFn = null,
     sideEffects = null,
     interceptor = null,
-    skipUpstreamErrorOnSideEffects = false,
-    skipUpstreamErrorOnInterceptor = false,
+    skipUpstreamErrorOnSideEffects = true,
+    skipUpstreamErrorOnInterceptor = true,
   }) =>
   (source$) =>
-    executeInterceptor({ id, interceptor, skipUpstreamErrorOnInterceptor })(
-      executeSideEffects({ id, sideEffects, skipUpstreamErrorOnSideEffects })(
-        executeOperator({
-          id,
-          operator:
-            operator ??
-            deferredPromiseToOperator({ deferredPromiseFn }) ??
-            throwInvalidOperatorError,
-          deferredPromiseFn,
-        })
-      )
+    R.pipe(
+      executeInterceptorOnBefore({ id, interceptor }),
+      executeSideEffectsOnBefore({ id, sideEffects }),
+      executeSideEffectsOnError({ id, sideEffects, skipUpstreamErrorOnSideEffects })(
+        executeInterceptorOnError({ id, interceptor, skipUpstreamErrorOnInterceptor })(
+          executeOperator({
+                id,
+                operator:
+                  operator ??
+                  deferredPromiseToOperator({ deferredPromiseFn }) ??
+                  throwInvalidOperatorError,
+                deferredPromiseFn,
+          }),
+        ),
+      ),
+      tap((el)=> console.log("1 - ", el)),
+      executeInterceptorOnAfter({ id, interceptor }),
+      tap((el)=> console.log("2 - ", el)),
+      executeSideEffectsOnAfter({ id, sideEffects }),
     )(source$);
 
 const executeOperator = R.curry(
@@ -79,117 +90,134 @@ const throwInvalidOperatorError = R.curry(
     )
 );
 
-// @TODO: onBefore과 onAfter, onError 두 부분으로 나눈다.
-const executeSideEffects = R.curry(
-  ({ id, sideEffects, skipUpstreamErrorOnSideEffects }, target$, source$) =>
-    new Observable((subscriber) => {
-      const latestValue$ = new BehaviorSubject(null);
-
-      return source$
-        .pipe(
-          tap((value) =>
-            sideEffects?.forEach(
-              ({ onBefore }) => onBefore && onBefore(id, value)
-            )
-          ),
-          concatMap((value) => {
-            latestValue$.next(value);
-
-            return of(value).pipe(target$);
-          }),
-          tap(
-            // next on tap
-            R.pipe(
-              R.when(
-                isNotNever,
-                R.tap((value) =>
-                  sideEffects?.forEach(
-                    ({ onAfter }) => onAfter && onAfter(id, value)
-                  )
-                )
-              ),
-              R.tap((value) => subscriber.next(value))
-            ),
-            // error on tap
-            R.tap(
-              R.ifElse(
-                (error) =>
-                  error instanceof CustomError &&
-                  skipUpstreamErrorOnSideEffects &&
-                  error.id !== id,
-                (error) => subscriber.error(error),
-                (error) =>
-                  sideEffects?.forEach(
-                    ({ onError }) =>
-                      onError && onError(id, error, latestValue$.getValue())
-                  )
-              )
-            )
+const executeSideEffectsOnBefore = R.curry(
+  ({ id, sideEffects }, source$) =>
+    new Observable((subscriber) =>
+      source$.pipe(
+        tap((value) =>
+          sideEffects?.forEach(
+            ({ onBefore }) => onBefore && onBefore(id, value)
           )
-        )
-        .subscribe({
-          error: (err) => subscriber.error(err),
-          complete: () => subscriber.complete(),
-        });
-    })
+        ),
+      ).subscribe(subscriber)
+    )
 );
 
-// @TODO: onBefore과 onAfter, onError 두 부분으로 나눈다.
-const executeInterceptor = R.curry(
-  ({ id, interceptor, skipUpstreamErrorOnInterceptor }, target$, source$) =>
-    new Observable((subscriber) => {
-      const latestValue$ = new BehaviorSubject(null);
-
-      return source$
-        .pipe(
-          concatMap((value) => {
-            let nextValue = null;
-            if (interceptor?.onBefore) {
-              nextValue = interceptor.onBefore(id, value);
-            } else {
-              nextValue = value;
-            }
-
-            latestValue$.next(nextValue);
-
-            return of(nextValue).pipe(
-              catchError((error) => throwError(new CustomError(id, error)))
-            );
-          }),
-          target$
+const executeSideEffectsOnAfter = R.curry(
+  ({ id, sideEffects }, source$) =>
+    new Observable((subscriber) =>
+      source$.pipe(
+        tap((value) =>
+          sideEffects?.forEach(
+            ({ onAfter }) => onAfter && onAfter(id, value)
+          )
         )
-        .subscribe({
-          next: (value) => 
-            subscriber.next( interceptor?.onAfter(id, value) ?? value),
-          error: (error) => {
-            let nextError = null;
+      ).subscribe(subscriber)
+    )
+  )
 
-            if (
-              error instanceof CustomError &&
-              skipUpstreamErrorOnInterceptor &&
-              error.id !== id
-            ) {
-              nextError = error;
-            } else if (interceptor?.onError) {
-              nextError = interceptor.onError(
+const executeSideEffectsOnError = R.curry(
+  ({ id, sideEffects, skipUpstreamErrorOnSideEffects }, target$, source$) => {
+    const latestValue$ = new BehaviorSubject(null);
+    
+    return new Observable((subscriber) =>
+      source$.pipe(
+        concatMap((value) => {
+          latestValue$.next(value);
+
+          return of(value).pipe(
+            target$,
+            tap(
+              R.identity,
+              R.tap(
+                R.ifElse(
+                  (error) =>
+                    skipUpstreamErrorOnSideEffects &&
+                    error instanceof CustomError &&
+                    error.id !== id,
+                  (error) => subscriber.error(error),
+                  (error) =>
+                    sideEffects?.forEach(
+                      ({ onError }) =>
+                        onError && onError(id, error, latestValue$.getValue())
+                    )
+                )
+              )
+            ),
+            tap((el)=> console.log('el ', el)),
+          );
+        }),
+      ).subscribe(subscriber)
+    )
+})
+
+const executeInterceptorOnBefore = R.curry(
+  ({ id, interceptor }, source$) =>
+    new Observable((subscriber) =>
+      source$.pipe(
+        map((value) => interceptor?.onBefore(id, value))
+      ).subscribe(subscriber)
+    )
+);
+
+const executeInterceptorOnAfter = R.curry(
+  ({ id, interceptor }, source$) =>
+    new Observable((subscriber) =>
+      source$.pipe(
+        map((value) => interceptor?.onAfter(id, value))
+      ).subscribe(subscriber)
+    )
+);
+
+const executeInterceptorOnError = R.curry(
+  ({ id, interceptor, skipUpstreamErrorOnInterceptor }, target$, source$) => {
+    const latestValue$ = new BehaviorSubject(null);
+
+    return new Observable((subscriber) =>
+      source$.pipe(
+        observeOn(queueScheduler),
+        concatMap((value) => {
+          latestValue$.next(value);
+
+          return of(value)
+          .pipe(
+            target$,
+          )
+        }),
+      ).subscribe({
+        ...subscriber,
+        error: (error) => {
+          let result = null;
+
+          if (
+            skipUpstreamErrorOnInterceptor &&
+            error instanceof CustomError &&
+            error.id !== id
+          ) {
+            return subscriber.error(error);
+          } else if (interceptor?.onError) {
+            try{ 
+              result = interceptor.onError(
                 id,
                 error,
                 latestValue$.getValue()
               );
-            } else {
-              nextError = error;
+            } catch(error) {
+              subscriber.error(error);
             }
+          } else {
+            subscriber.error(error)
+          }
 
-            subscriber.error(nextError);
-          },
-          complete: () => subscriber.complete(),
-        });
-    })
+          subscriber.next(result);
+          
+        },
+      })
+    );
+  }
 );
 
 module.exports = { step };
-
-const isNotNever = R.complement(R.equals(NEVER));
 
 class CustomError extends Error {
   id = null;
