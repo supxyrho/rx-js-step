@@ -62,6 +62,7 @@ of("testValue")
       operator: (source$) =>
         source$.pipe(
           map(() => {
+            // return 3
             throw new Error("operator_error");
           })
         ),
@@ -70,17 +71,23 @@ of("testValue")
           console.log("interceptor_onBefore", id, value);
           return "d";
         },
-        onAfter: (id, value) => console.log("interceptor_onAfter", id, value),
+        onAfter: (id, value) => { 
+          console.log("interceptor_onAfter", id, value)
+            return 5
+          },
         onError: (id, error, acc) => {
           console.log("intereptor_onError", id, error, acc);
           return "error-d";
+          // throw new Error()
+          // return new Error('___!')
         },
       },
       sideEffects: [
         {
           onBefore: (id, value) =>
             console.log("sideEffects_onBefore", id, value),
-          onError: (id, value) => console.log("sideEffect_onAfter", id, value),
+          onAfter: (id, value) => console.log("sideEffects_onAfter", id, value),
+          onError: (id, value) => console.log("sideEffect_onError", id, value),
         },
       ],
     })
