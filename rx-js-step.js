@@ -1,5 +1,6 @@
 const {
   NEVER,
+  iif,
   Observable,
   catchError,
   concatMap,
@@ -24,28 +25,34 @@ const step =
     interceptor = null,
     skipUpstreamErrorOnSideEffects = true,
     skipUpstreamErrorOnInterceptor = true,
+    skipWhen = null,
   }) =>
-  (source$) =>
-    R.pipe(
-      executeInterceptorOnBefore({ id, interceptor }),
-      executeSideEffectsOnBefore({ id, sideEffects }),
-      executeSideEffectsOnError({ id, sideEffects, skipUpstreamErrorOnSideEffects })(
-        executeInterceptorOnError({ id, interceptor, skipUpstreamErrorOnInterceptor })(
-          executeOperator({
-                id,
-                operator:
-                  operator ??
-                  deferredPromiseToOperator({ deferredPromiseFn }) ??
-                  throwInvalidOperatorError,
-                deferredPromiseFn,
-          }),
-        ),
-      ),
-      tap((el)=> console.log("1 - ", el)),
-      executeInterceptorOnAfter({ id, interceptor }),
-      tap((el)=> console.log("2 - ", el)),
-      executeSideEffectsOnAfter({ id, sideEffects }),
-    )(source$);
+  (source$) => source$.pipe(
+    concatMap((value) => {
+      return  iif(
+        () => skipWhen && skipWhen(value), 
+        of(value), 
+        of(value).pipe(
+          executeInterceptorOnBefore({ id, interceptor }),
+          executeSideEffectsOnBefore({ id, sideEffects }),
+          executeSideEffectsOnError({ id, sideEffects, skipUpstreamErrorOnSideEffects })(
+            executeInterceptorOnError({ id, interceptor, skipUpstreamErrorOnInterceptor })(
+              executeOperator({
+                    id,
+                    operator:
+                      operator ??
+                      deferredPromiseToOperator({ deferredPromiseFn }) ??
+                      throwInvalidOperatorError,
+                    deferredPromiseFn,
+              }),
+            ),
+          ),
+          executeInterceptorOnAfter({ id, interceptor }),
+          executeSideEffectsOnAfter({ id, sideEffects })
+      )
+    )
+  })
+)
 
 const executeOperator = R.curry(
   ({ id, operator }, source$) =>
