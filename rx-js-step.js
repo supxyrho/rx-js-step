@@ -12,7 +12,6 @@ const {
   of,
   queueScheduler,
   tap,
-  throwError,
   BehaviorSubject,
 } = require('rxjs');
 const {observeOn} = require('rxjs/operators');
@@ -65,7 +64,13 @@ const executeOperator = R.curry(
                 concatMap((value) =>
                   of(value).pipe(
                       operator,
-                      catchError((error) => throwError(new CustomError(id, error))),
+                      catchError((error) => {
+                        if (error instanceof CustomError) {
+                          throw error;
+                        } else {
+                          throw new CustomError(id, error);
+                        }
+                      }),
                   ),
                 ),
             ).subscribe(subscriber),
@@ -86,11 +91,9 @@ const throwInvalidOperatorError = R.curry(
       new Observable((subscriber) =>
         source$
             .pipe(
-                map(() =>
-                  throwError(
-                      new Error('operator or deferredPromiseFn is not valid prop'),
-                  ),
-                ),
+                map(() => {
+                  throw new Error('operator or deferredPromiseFn is not valid prop');
+                }),
             )
             .subscribe({
               error: (err) => {
@@ -142,7 +145,7 @@ const executeSideEffectsOnError = R.curry(
                       R.tap(
                           R.ifElse(
                               (error) =>
-                                skipUpstreamErrorOnSideEffects ||
+                                skipUpstreamErrorOnSideEffects &&
                                 error instanceof CustomError &&
                                 error.id !== id,
                               (error) => subscriber.error(error),
@@ -200,24 +203,28 @@ const executeInterceptorOnError = R.curry(
             let result = null;
 
             if (
-              skipUpstreamErrorOnInterceptor ||
+              skipUpstreamErrorOnInterceptor &&
               error instanceof CustomError &&
               error.id !== id
             ) {
               return subscriber.error(error);
-            } else if (interceptor?.onError) {
+            } else if (interceptor?.onError && error.id === id) {
               try {
                 result = interceptor.onError(
                     id,
                     error,
                     latestValue$.getValue(),
                 );
+
+                if (result instanceof CustomError) {
+                  return subscriber.error(result);
+                }
+
                 return subscriber.next(result);
               } catch (error) {
                 return subscriber.error(error);
               }
             }
-
             return subscriber.error(error);
           },
         }),
