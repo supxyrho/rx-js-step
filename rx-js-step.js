@@ -28,8 +28,8 @@ const step =
     skipWhen = null,
   }) =>
   (source$) => source$.pipe(
-    concatMap((value) => {
-      return  iif(
+    concatMap((value) => 
+      iif(
         () => skipWhen && skipWhen(value), 
         of(value), 
         of(value).pipe(
@@ -51,7 +51,7 @@ const step =
           executeSideEffectsOnAfter({ id, sideEffects })
       )
     )
-  })
+  )
 )
 
 const executeOperator = R.curry(
@@ -59,24 +59,25 @@ const executeOperator = R.curry(
     new Observable((subscriber) =>
       source$
         .pipe(
-          concatMap((value) => {
-            return of(value).pipe(
+          concatMap((value) => 
+            of(value).pipe(
               operator,
               catchError((error) => throwError(new CustomError(id, error)))
-            );
-          })
+            )
         )
         .subscribe(subscriber)
     )
-);
+  )
+)
 
-const deferredPromiseToOperator = R.curry(({ deferredPromiseFn }, source$) => {
-  return new Observable((subscriber) =>
+const deferredPromiseToOperator = R.curry(
+  ({ deferredPromiseFn }, source$) => 
+  new Observable((subscriber) =>
     source$
       .pipe(concatMap((value) => from(deferredPromiseFn(value))))
       .subscribe(subscriber)
-  );
-});
+  )
+);
 
 const throwInvalidOperatorError = R.curry(
   (source$) =>
